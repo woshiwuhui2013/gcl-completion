@@ -1,23 +1,118 @@
 {
-  "name": "gcl-completion",
-  "displayName": "gcl_completion",
-  "description": "",
-  "version": "0.0.1",
+  "name": "vscode-llm-code-assistant",
+  "displayName": "LLM代码补全助手",
+  "description": "通过大型语言模型(LLM)提供智能代码补全和推荐",
+  "version": "1.0.0",
   "engines": {
-    "vscode": "^1.99.0"
+    "vscode": "^1.70.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Programming Languages",
+    "Snippets"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:llm-code-assistant.triggerCompletion",
+    "onCommand:llm-code-assistant.applyLastSuggestion",
+    "onCommand:llm-code-assistant.toggleCompletionMode"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "gcl-completion.helloWorld",
-        "title": "Hello World"
+        "command": "llm-code-assistant.triggerCompletion",
+        "title": "LLM代码助手: 触发代码补全"
+      },
+      {
+        "command": "llm-code-assistant.toggleCompletionMode",
+        "title": "LLM代码助手: 切换补全模式(单行/代码段)"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "llm-code-assistant.triggerCompletion",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      }
+    ],
+    "configuration": {
+      "title": "LLM代码补全助手",
+      "properties": {
+        "llm-code-assistant.apiProvider": {
+          "type": "string",
+          "default": "openai",
+          "enum": [
+            "openai",
+            "anthropic",
+            "deepseek",
+            "other"
+          ],
+          "enumDescriptions": [
+            "使用OpenAI API",
+            "使用Anthropic API",
+            "使用Deepseek API",
+            "使用其他LLM提供商API"
+          ],
+          "description": "选择使用的LLM API提供商"
+        },
+        "llm-code-assistant.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LLM提供商的API密钥"
+        },
+        "llm-code-assistant.completionMode": {
+          "type": "string",
+          "default": "snippet",
+          "enum": [
+            "line",
+            "snippet"
+          ],
+          "enumDescriptions": [
+            "只生成单行代码",
+            "生成完整代码段"
+          ],
+          "description": "选择代码补全模式"
+        },
+        "llm-code-assistant.contextLineCount": {
+          "type": "number",
+          "default": 50,
+          "description": "代码上下文行数(前后各X行)"
+        },
+        "llm-code-assistant.autoSuggest": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否自动显示代码建议(无需手动触发)"
+        },
+        "llm-code-assistant.modelName": {
+          "type": "string",
+          "default": "gpt-4",
+          "description": "使用的模型名称，根据选择的提供商可能需要不同的值",
+          "enum": [
+            "gpt-3.5-turbo",
+            "gpt-4",
+            "gpt-4-turbo",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "deepseek-coder",
+            "deepseek-chat"
+          ],
+          "enumDescriptions": [
+            "OpenAI GPT-3.5 Turbo",
+            "OpenAI GPT-4",
+            "OpenAI GPT-4 Turbo",
+            "Anthropic Claude 3 Opus",
+            "Anthropic Claude 3 Sonnet",
+            "Deepseek Coder",
+            "Deepseek Chat"
+          ]
+        },
+        "llm-code-assistant.defaultPrompt": {
+          "type": "string",
+          "default": "根据上下文提供合适的代码补全",
+          "description": "当用户没有输入提示时使用的默认提示"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -28,20 +123,26 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.99.0",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "18.x",
-    "@typescript-eslint/eslint-plugin": "^7.7.1",
-    "@typescript-eslint/parser": "^7.7.1",
-    "eslint": "^8.57.0",
-    "typescript": "^5.4.5",
-    "ts-loader": "^9.5.1",
-    "webpack": "^5.91.0",
-    "webpack-cli": "^5.1.4",
-    "@vscode/test-cli": "^0.0.9",
-    "@vscode/test-electron": "^2.3.9"
+    "@types/glob": "^7.2.0",
+    "@types/mocha": "^9.1.1",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.70.0",
+    "@typescript-eslint/eslint-plugin": "^5.31.0",
+    "@typescript-eslint/parser": "^5.31.0",
+    "@vscode/test-electron": "^2.1.5",
+    "eslint": "^8.20.0",
+    "glob": "^8.0.3",
+    "mocha": "^10.0.0",
+    "ts-loader": "^9.3.1",
+    "typescript": "^4.7.4",
+    "webpack": "^5.74.0",
+    "webpack-cli": "^4.10.0"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "openai": "^4.0.0"
   }
 }
