@@ -30,6 +30,8 @@ export class CodeFormatter {
             const isBlockEnd = /^\s*[})]/.test(cleanedCode);
             
             if (startsBlock || isBlockEnd) {
+                
+
                 return cleanedCode; // 无需添加额外缩进
             }
         }

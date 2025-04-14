@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ContextAnalyzer, ContextInfo } from './contextAnalyzer';
+import { ContextAnalyzer,ContextInfo } from './contextAnalyzer';
 import { LLMConnector } from './llmConnector';
 import { CodeFormatter } from './codeFormatter';
 
@@ -43,8 +43,11 @@ export class CompletionProvider {
             // 获取代码上下文
             const context = this.contextAnalyzer.getContext(editor);
             
+
+            
             // 获取项目信息（可选）
             const projectInfo = await this.contextAnalyzer.analyzeProject();
+            
             
             // 构建提示
             const prompt = await this.buildPrompt(promptText, context, projectInfo);
