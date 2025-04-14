@@ -40,17 +40,20 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+			console.log('editor', editor);
             // 验证API配置
             if (!isApiConfigValid()) {
                 await promptForApiConfig();
                 return;
             }
+			console.log('isApiConfigValid', isApiConfigValid());
 
             // 获取用户提示（可选）
-            const promptText = await vscode.window.showInputBox({
-                prompt: '请输入代码补全提示（可选）',
-                placeHolder: '例如：实现一个排序函数'
-            });
+            // const promptText = await vscode.window.showInputBox({
+            //     prompt: '请输入代码补全提示（可选）',
+            //     placeHolder: '例如：实现一个排序函数'
+            // });
+			const promptText = '';
 
             // 触发内联补全
             try {

@@ -1,11 +1,16 @@
 import * as vscode from 'vscode';
 import axios from 'axios';
 import { OpenAI } from 'openai';
+import { log, warn } from './utils';
 
 /**
  * 负责与LLM API进行通信
  */
 export class LLMConnector {
+    // 请求超时时间配置(毫秒)
+    private readonly DEFAULT_TIMEOUT = 30000; // 30秒
+    private readonly MAX_RETRIES = 2; // 最大重试次数
+
     /**
      * 从Markdown文本中提取代码
      * @param text 可能包含Markdown格式的文本
@@ -43,18 +48,105 @@ export class LLMConnector {
         if (!apiKey) {
             throw new Error('请在设置中配置API密钥');
         }
+
+        // 日志记录请求开始
+        log(`开始请求${apiProvider} API...`);
         
-        // 根据不同的API提供商调用不同的方法
-        switch (apiProvider.toLowerCase()) {
-            case 'openai':
-                return this.callOpenAI(prompt, apiKey, cancellationToken);
-            case 'anthropic':
-                return this.callAnthropic(prompt, apiKey, cancellationToken);
-            case 'deepseek':
-                return this.callDeepseek(prompt, apiKey, cancellationToken);
-            default:
-                throw new Error(`不支持的API提供商: ${apiProvider}`);
+        // 重试逻辑
+        let retryCount = 0;
+        let lastError: Error | null = null;
+
+        while (retryCount <= this.MAX_RETRIES) {
+            try {
+                // 检查取消令牌
+                if (cancellationToken?.isCancellationRequested) {
+                    throw new Error('请求已取消');
+                }
+
+                // 根据不同的API提供商调用不同的方法
+                let result: string;
+                switch (apiProvider.toLowerCase()) {
+                    case 'openai':
+                        result = await this.callOpenAI(prompt, apiKey, cancellationToken);
+                        break;
+                    case 'anthropic':
+                        result = await this.callAnthropic(prompt, apiKey, cancellationToken);
+                        break;
+                    case 'deepseek':
+                        result = await this.callDeepseek(prompt, apiKey, cancellationToken);
+                        break;
+                    default:
+                        throw new Error(`不支持的API提供商: ${apiProvider}`);
+                }
+
+                // 请求成功，记录日志
+                log(`${apiProvider} API请求成功`);
+                return result;
+            } catch (error: any) {
+                // 如果是用户主动取消或请求中断，直接抛出错误
+                if (error.message === '请求已取消' || 
+                    error.name === 'AbortError' || 
+                    error.name === 'CanceledError' ||
+                    cancellationToken?.isCancellationRequested) {
+                    throw new Error('请求已取消');
+                }
+
+                // 保存最后一次错误
+                lastError = error;
+
+                // 判断是否需要重试
+                const shouldRetry = this.shouldRetryError(error);
+                
+                if (shouldRetry && retryCount < this.MAX_RETRIES) {
+                    // 增加重试计数
+                    retryCount++;
+                    
+                    // 记录重试信息
+                    warn(`API请求失败，正在进行第${retryCount}次重试...`);
+                    
+                    // 等待一段时间后重试，使用指数退避策略
+                    const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    // 超过重试次数或不可重试的错误，抛出
+                    break;
+                }
+            }
         }
+
+        // 如果所有重试都失败，抛出最后一次错误
+        throw lastError || new Error('未知错误');
+    }
+    
+    /**
+     * 判断是否应该重试请求
+     * @param error 错误对象
+     * @returns 是否应该重试
+     */
+    private shouldRetryError(error: any): boolean {
+        // 网络错误通常可以重试
+        if (error.isAxiosError) {
+            // 服务器错误(5xx)可以重试
+            if (error.response && error.response.status >= 500 && error.response.status < 600) {
+                return true;
+            }
+            
+            // 网络超时或连接失败可以重试
+            if (!error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+                return true;
+            }
+        }
+        
+        // 如果错误信息包含"超时"或"timeout"，可能是超时错误，可以重试
+        if (error.message && (
+            error.message.includes('timeout') || 
+            error.message.includes('超时') || 
+            error.message.includes('timed out')
+        )) {
+            return true;
+        }
+        
+        return false;
     }
     
     /**
@@ -79,7 +171,8 @@ export class LLMConnector {
             // 创建OpenAI客户端
             const openai = new OpenAI({
                 apiKey: apiKey,
-                baseURL: customEndpoint || undefined  // 如果提供了自定义端点则使用
+                baseURL: customEndpoint || undefined,  // 如果提供了自定义端点则使用
+                timeout: this.DEFAULT_TIMEOUT // 设置超时
             });
             
             // 设置取消处理
@@ -95,6 +188,11 @@ export class LLMConnector {
                 ? '你是一个专业的代码助手，能够提供高质量的代码补全。请只提供一行代码，不要添加任何解释或额外内容。确保代码风格一致。'
                 : '你是一个专业的代码助手，能够提供高质量的代码补全和建议。请只返回代码片段，无需解释。确保代码风格一致。';
             
+            // 检查取消标志
+            if (cancellationToken?.isCancellationRequested) {
+                throw new Error('请求已取消');
+            }
+
             // 调用API
             const response = await openai.chat.completions.create({
                 model: modelName,
@@ -123,9 +221,13 @@ export class LLMConnector {
             // 处理代码块标记符
             return this.extractCodeFromMarkdown(generatedText);
         } catch (error: any) {
-            if (error.name === 'AbortError') {
+            if (error.name === 'AbortError' || cancellationToken?.isCancellationRequested) {
                 throw new Error('请求已取消');
             }
+            
+            // 记录详细错误信息
+            log(`OpenAI API 错误详情: ${JSON.stringify(error)}`);
+            
             throw new Error(`OpenAI API 错误: ${error.message}`);
         }
     }
@@ -165,6 +267,11 @@ export class LLMConnector {
             // 构建API URL - 使用自定义端点或默认端点
             const apiUrl = customEndpoint || 'https://api.anthropic.com/v1/messages';
             
+            // 检查取消标志
+            if (cancellationToken?.isCancellationRequested) {
+                throw new Error('请求已取消');
+            }
+
             // 构建请求
             const response = await axios.post(
                 apiUrl,
@@ -186,7 +293,8 @@ export class LLMConnector {
                         'anthropic-version': '2023-06-01',
                         'x-api-key': apiKey
                     },
-                    signal: controller.signal
+                    signal: controller.signal,
+                    timeout: this.DEFAULT_TIMEOUT
                 }
             );
             
@@ -196,9 +304,15 @@ export class LLMConnector {
             // 处理代码块标记符
             return this.extractCodeFromMarkdown(generatedText);
         } catch (error: any) {
-            if (error.name === 'AbortError' || error.name === 'CanceledError') {
+            if (error.name === 'AbortError' || 
+                error.name === 'CanceledError' || 
+                cancellationToken?.isCancellationRequested) {
                 throw new Error('请求已取消');
             }
+
+            // 记录详细错误信息
+            log(`Anthropic API 错误详情: ${JSON.stringify(error)}`);
+            
             throw new Error(`Anthropic API 错误: ${error.message}`);
         }
     }
@@ -244,6 +358,11 @@ export class LLMConnector {
                 actualModel = 'deepseek-chat';
             }
             
+            // 检查取消标志
+            if (cancellationToken?.isCancellationRequested) {
+                throw new Error('请求已取消');
+            }
+
             // 构建请求体
             const requestBody = {
                 model: actualModel,
@@ -273,7 +392,8 @@ export class LLMConnector {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiKey}`
                     },
-                    signal: controller.signal
+                    signal: controller.signal,
+                    timeout: this.DEFAULT_TIMEOUT
                 }
             );
             
@@ -283,9 +403,14 @@ export class LLMConnector {
             // 处理代码块标记符
             return this.extractCodeFromMarkdown(generatedText);
         } catch (error: any) {
-            if (error.name === 'AbortError' || error.name === 'CanceledError') {
+            if (error.name === 'AbortError' || 
+                error.name === 'CanceledError' || 
+                cancellationToken?.isCancellationRequested) {
                 throw new Error('请求已取消');
             }
+            
+            // 记录详细错误信息
+            log(`Deepseek API 错误详情: ${JSON.stringify(error)}`);
             
             // 提取API错误信息
             let errorMessage = `Deepseek API 错误: ${error.message}`;

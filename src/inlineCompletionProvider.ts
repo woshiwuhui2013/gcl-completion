@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ContextAnalyzer, ContextInfo } from './contextAnalyzer';
 import { LLMConnector } from './llmConnector';
 import { CodeFormatter } from './codeFormatter';
-import { log, showError } from './utils';
+import { log, showError, delay } from './utils';
 
 /**
  * 内联代码补全提供者
@@ -14,6 +14,10 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
     private codeFormatter: CodeFormatter;
     private userPrompt: string | null = null;
     private pendingRequest: boolean = false;
+    private pendingRequestTimeout: NodeJS.Timeout | null = null;
+    private lastRequestTime: number = 0;
+    private readonly REQUEST_DEBOUNCE_TIME = 500; // 请求防抖时间(毫秒)
+    private readonly REQUEST_TIMEOUT = 60000; // 请求超时时间(毫秒)
     
     /**
      * 构造函数
@@ -58,19 +62,45 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
         context: vscode.InlineCompletionContext,
         token: vscode.CancellationToken
     ): Promise<vscode.InlineCompletionItem[] | vscode.InlineCompletionList | null> {
-        // 避免重复请求
-        if (this.pendingRequest) {
+        // 防抖处理，避免快速输入时频繁请求
+        const now = Date.now();
+        if (now - this.lastRequestTime < this.REQUEST_DEBOUNCE_TIME) {
             return null;
+        }
+        this.lastRequestTime = now;
+        
+        // 检查是否已有挂起的请求，如果有则取消
+        if (this.pendingRequest) {
+            if (this.pendingRequestTimeout) {
+                clearTimeout(this.pendingRequestTimeout);
+                this.pendingRequestTimeout = null;
+            }
+            // 我们不立即重置pendingRequest标志，而是在一小段延迟后再尝试
+            await delay(100);
+            
+            // 如果还是有挂起的请求，可能是之前的请求未完成，这里直接返回
+            if (this.pendingRequest) {
+                log('已有请求正在处理中，跳过当前请求');
+                return null;
+            }
         }
         
         // 检查是否是手动触发或自动触发
         const config = vscode.workspace.getConfiguration('llm-code-assistant');
         const autoSuggest = config.get<boolean>('autoSuggest', false);
+        const isTriggeredByCommand = context && context.triggerKind !== undefined;
         
         // 如果没有自动建议且没有用户提示且不是手动触发，则不提供建议
-        if (!autoSuggest && !this.userPrompt && !context.triggerKind) {
+        if (!autoSuggest && !this.userPrompt && !isTriggeredByCommand) {
             return null;
         }
+        
+        // 设置请求超时
+        this.pendingRequestTimeout = setTimeout(() => {
+            log('请求超时，自动取消');
+            this.pendingRequest = false;
+            this.pendingRequestTimeout = null;
+        }, this.REQUEST_TIMEOUT);
         
         try {
             this.pendingRequest = true;
@@ -78,6 +108,13 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             // 创建编辑器对象用于上下文分析
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
+                this.resetPendingState();
+                return null;
+            }
+            
+            // 检查取消令牌
+            if (token.isCancellationRequested) {
+                this.resetPendingState();
                 return null;
             }
             
@@ -88,8 +125,9 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             const lineText = document.lineAt(position.line).text;
             const linePrefix = lineText.substring(0, position.character);
             
-            // 取消处理
+            // 再次检查取消令牌
             if (token.isCancellationRequested) {
+                this.resetPendingState();
                 return null;
             }
             
@@ -105,7 +143,9 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
                 token
             );
             
+            // 检查取消令牌和请求结果
             if (token.isCancellationRequested || !suggestions.length) {
+                this.resetPendingState();
                 return null;
             }
             
@@ -117,11 +157,30 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             });
             
             return items;
-        } catch (error) {
+        } catch (error: any) {
+            // 如果错误是由于请求取消，直接返回null
+            if (error.message && error.message.includes('取消')) {
+                log('请求已被取消');
+                return null;
+            }
+            
+            // 记录错误
             log(`内联补全错误: ${error}`);
             return null;
         } finally {
-            this.pendingRequest = false;
+            // 无论成功或失败，确保重置状态
+            this.resetPendingState();
+        }
+    }
+    
+    /**
+     * 重置挂起状态
+     */
+    private resetPendingState(): void {
+        this.pendingRequest = false;
+        if (this.pendingRequestTimeout) {
+            clearTimeout(this.pendingRequestTimeout);
+            this.pendingRequestTimeout = null;
         }
     }
     
@@ -146,12 +205,25 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             // 构建LLM提示
             const prompt = this.buildPrompt(contextInfo, completionMode);
             
-            // 调用LLM获取建议
-            let suggestion = await this.llmConnector.getCompletion(prompt, token);
-            
+            // 检查取消令牌
             if (token.isCancellationRequested) {
                 return [];
             }
+            
+            // 记录请求开始
+            log(`开始请求代码补全，模式: ${completionMode}`);
+            
+            // 调用LLM获取建议
+            let suggestion = await this.llmConnector.getCompletion(prompt, token);
+            
+            // 请求完成后再次检查取消令牌
+            if (token.isCancellationRequested) {
+                log('请求完成但已被取消，丢弃结果');
+                return [];
+            }
+            
+            // 记录原始建议
+            log(`收到原始建议: ${suggestion.substring(0, 100)}${suggestion.length > 100 ? '...' : ''}`);
             
             // 格式化建议
             // 处理单行模式 - 确保LLM只生成一行
@@ -170,8 +242,18 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             // 应用代码风格
             suggestion = this.codeFormatter.applyCodeStyle(suggestion, document);
             
+            // 记录格式化后的建议
+            log(`格式化后的建议: ${suggestion.substring(0, 100)}${suggestion.length > 100 ? '...' : ''}`);
+            
             return suggestion ? [suggestion] : [];
-        } catch (error) {
+        } catch (error: any) {
+            // 如果是取消请求，不显示错误
+            if (error.message === '请求已取消' || token.isCancellationRequested) {
+                log('获取建议时请求被取消');
+                return [];
+            }
+            
+            // 记录错误
             showError('获取补全建议失败', error);
             return [];
         }

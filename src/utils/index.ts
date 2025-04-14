@@ -29,7 +29,8 @@ export function showError(message: string, error?: any): void {
  */
 export function log(message: string): void {
     const outputChannel = getOutputChannel();
-    outputChannel.appendLine(`[信息] ${message}`);
+    const timestamp = new Date().toISOString();
+    outputChannel.appendLine(`[${timestamp}] [信息] ${message}`);
 }
 
 /**
@@ -38,7 +39,25 @@ export function log(message: string): void {
  */
 export function warn(message: string): void {
     const outputChannel = getOutputChannel();
-    outputChannel.appendLine(`[警告] ${message}`);
+    const timestamp = new Date().toISOString();
+    outputChannel.appendLine(`[${timestamp}] [警告] ${message}`);
+}
+
+/**
+ * 记录调试信息到输出控制台
+ * 仅在调试模式下显示
+ * @param message 调试消息
+ */
+export function debug(message: string): void {
+    // 检查是否启用了调试模式
+    const config = vscode.workspace.getConfiguration('llm-code-assistant');
+    const isDebugMode = config.get<boolean>('debugMode', false);
+    
+    if (isDebugMode) {
+        const outputChannel = getOutputChannel();
+        const timestamp = new Date().toISOString();
+        outputChannel.appendLine(`[${timestamp}] [调试] ${message}`);
+    }
 }
 
 /**
@@ -135,4 +154,58 @@ export function detectLanguageCategory(languageId: string): 'scripting' | 'compi
     } else {
         return 'other';
     }
+}
+
+/**
+ * 格式化错误对象为可读字符串
+ * @param error 错误对象
+ * @returns 格式化的错误字符串
+ */
+export function formatError(error: any): string {
+    if (!error) {
+        return '未知错误';
+    }
+    
+    // 处理常见错误类型
+    if (error instanceof Error) {
+        // 标准Error对象
+        return `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ''}`;
+    } else if (typeof error === 'string') {
+        // 字符串错误
+        return error;
+    } else if (error.isAxiosError) {
+        // Axios错误
+        const response = error.response;
+        if (response) {
+            return `请求错误(${response.status}): ${response.statusText || '未知错误'}\n${
+                response.data && response.data.error ? response.data.error.message || JSON.stringify(response.data.error) : ''
+            }`;
+        } else {
+            return `网络错误: ${error.message || '连接失败'}`;
+        }
+    } else {
+        // 其他类型错误
+        try {
+            return JSON.stringify(error, null, 2);
+        } catch (e) {
+            return String(error);
+        }
+    }
+}
+
+/**
+ * 检查VSCode是否在Windows上运行
+ * @returns 是否是Windows平台
+ */
+export function isWindows(): boolean {
+    return process.platform === 'win32';
+}
+
+/**
+ * 清理路径分隔符，确保在不同平台上正确
+ * @param path 路径
+ * @returns 标准化的路径
+ */
+export function cleanPath(path: string): string {
+    return isWindows() ? path.replace(/\//g, '\\') : path.replace(/\\/g, '/');
 }

@@ -2,7 +2,7 @@
   "name": "vscode-llm-code-assistant",
   "displayName": "LLM代码补全助手",
   "description": "通过大型语言模型(LLM)提供智能代码补全和推荐",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.70.0"
   },
@@ -60,6 +60,11 @@
           "default": "",
           "description": "LLM提供商的API密钥"
         },
+        "llm-code-assistant.apiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "自定义API端点URL（可选，留空使用默认端点）"
+        },
         "llm-code-assistant.completionMode": {
           "type": "string",
           "default": "snippet",
@@ -110,6 +115,26 @@
           "type": "string",
           "default": "根据上下文提供合适的代码补全",
           "description": "当用户没有输入提示时使用的默认提示"
+        },
+        "llm-code-assistant.timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "API请求超时时间(毫秒)"
+        },
+        "llm-code-assistant.maxRetries": {
+          "type": "number",
+          "default": 2,
+          "description": "API请求失败时的最大重试次数"
+        },
+        "llm-code-assistant.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "启用调试模式，输出更详细的日志信息"
+        },
+        "llm-code-assistant.customPromptTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "自定义提示模板，可使用{promptText}和{codeContext}作为占位符"
         }
       }
     }
