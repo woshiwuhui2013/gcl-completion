@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ContextAnalyzer, ContextInfo } from './contextAnalyzer';
 import { LLMConnector } from './llmConnector';
 import { CodeFormatter } from './codeFormatter';
+import { PromptBuilder } from './promptBuilder';
 import { log, showError, delay } from './utils';
 
 /**
@@ -12,6 +13,7 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
     private contextAnalyzer: ContextAnalyzer;
     private llmConnector: LLMConnector;
     private codeFormatter: CodeFormatter;
+    private promptBuilder: PromptBuilder;
     private userPrompt: string | null = null;
     private pendingRequest: boolean = false;
     private pendingRequestTimeout: NodeJS.Timeout | null = null;
@@ -33,6 +35,7 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
         this.contextAnalyzer = contextAnalyzer;
         this.llmConnector = llmConnector;
         this.codeFormatter = codeFormatter;
+        this.promptBuilder = new PromptBuilder();
     }
     
     /**
@@ -118,8 +121,11 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
                 return null;
             }
             
-            // 获取代码上下文
+            // 获取代码上下文（增强版）
             const contextInfo = this.contextAnalyzer.getContext(editor);
+            
+            // 获取项目信息（增强提示）
+            const projectInfo = await this.contextAnalyzer.analyzeProject();
             
             // 记录当前位置 - 使用position参数确保我们获取正确位置的补全
             const lineText = document.lineAt(position.line).text;
@@ -139,6 +145,7 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
                 document, 
                 position, 
                 contextInfo, 
+                projectInfo,
                 completionMode,
                 token
             );
@@ -189,6 +196,7 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
      * @param document 当前文档
      * @param position 光标位置
      * @param contextInfo 上下文信息
+     * @param projectInfo 项目信息
      * @param completionMode 补全模式
      * @param token 取消令牌
      * @returns 建议列表
@@ -197,13 +205,19 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
         document: vscode.TextDocument,
         position: vscode.Position,
         contextInfo: ContextInfo,
+        projectInfo: any,
         completionMode: string,
         token: vscode.CancellationToken
     ): Promise<string[]> {
         try {
             console.log(position)
-            // 构建LLM提示
-            const prompt = this.buildPrompt(contextInfo, completionMode);
+            // 使用新的PromptBuilder构建更智能的提示词
+            const prompt = this.promptBuilder.buildPrompt(
+                contextInfo,
+                projectInfo,
+                this.userPrompt,
+                completionMode
+            );
             
             // 检查取消令牌
             if (token.isCancellationRequested) {
@@ -257,69 +271,5 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
             showError('获取补全建议失败', error);
             return [];
         }
-    }
-    
-    /**
-     * 构建LLM提示
-     * @param contextInfo 上下文信息
-     * @param completionMode 补全模式
-     * @returns 提示字符串
-     */
-    private buildPrompt(contextInfo: ContextInfo, completionMode: string): string {
-        // 获取配置
-        const config = vscode.workspace.getConfiguration('llm-code-assistant');
-        const apiProvider = config.get<string>('apiProvider') || 'openai';
-        const modelName = config.get<string>('modelName') || 'gpt-4';
-        
-        // 基础系统提示
-        let baseSystemPrompt = `你是一个专业的代码助手，根据代码上下文提供高质量的代码补全。
-${completionMode === 'line' ? '请只生成一行代码，不要包含换行符。' : '请生成合适的代码片段。'}
-请确保生成的代码与现有代码风格一致，并且语法正确。
-不要包含解释，只返回代码本身。`;
-
-        // 针对不同模型的特殊提示
-        if (apiProvider === 'deepseek' && modelName.includes('deepseek-coder')) {
-            baseSystemPrompt += '\n你是Deepseek Coder，专门为代码补全设计的模型，拥有强大的编程能力。';
-        }
-
-        // 构建上下文信息
-        const contextPrompt = `文件: ${contextInfo.fileName}
-语言: ${contextInfo.languageId}
-
-上文代码:
-${contextInfo.beforeCode}
-
-当前行:
-${contextInfo.beforeCursor}|光标位置|${contextInfo.afterCursor}
-
-下文代码:
-${contextInfo.afterCode}`;
-
-        // 如果有检测到常见符号，添加到提示中
-        if (contextInfo.symbolInfo && contextInfo.symbolInfo.length > 0) {
-            const topSymbols = contextInfo.symbolInfo.slice(0, 15);
-            const symbolsText = `附近的标识符: ${topSymbols.join(', ')}`;
-            
-            // 添加到提示末尾
-            return `${baseSystemPrompt}
-
-${contextPrompt}
-
-${symbolsText}
-
-${this.userPrompt ? `用户特别要求: ${this.userPrompt}` : config.get<string>('defaultPrompt') || '请根据上下文，在光标位置提供合适的代码补全。'}`;
-        }
-
-        // 添加用户提示（如果有）或默认提示
-        const userPromptText = this.userPrompt ? 
-            `用户特别要求: ${this.userPrompt}` : 
-            config.get<string>('defaultPrompt') || '请根据上下文，在光标位置提供合适的代码补全。';
-
-        // 合并提示
-        return `${baseSystemPrompt}
-
-${contextPrompt}
-
-${userPromptText}`;
     }
 }

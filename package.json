@@ -2,7 +2,7 @@
   "name": "vscode-llm-code-assistant",
   "displayName": "LLM代码补全助手",
   "description": "通过大型语言模型(LLM)提供智能代码补全和推荐",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "engines": {
     "vscode": "^1.70.0"
   },
@@ -134,7 +134,44 @@
         "llm-code-assistant.customPromptTemplate": {
           "type": "string",
           "default": "",
-          "description": "自定义提示模板，可使用{promptText}和{codeContext}作为占位符"
+          "description": "自定义提示模板，可使用{promptText}、{codeContext}、{enhancedContext}和{projectInfo}作为占位符"
+        },
+        "llm-code-assistant.useCodeStructureInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "在提示中包含代码结构信息(如函数、类等)"
+        },
+        "llm-code-assistant.useSyntaxContextInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "在提示中包含语法上下文信息"
+        },
+        "llm-code-assistant.useRelatedImports": {
+          "type": "boolean",
+          "default": true,
+          "description": "在提示中包含相关导入信息"
+        },
+        "llm-code-assistant.useProjectInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "在提示中包含项目信息(如依赖等)"
+        },
+        "llm-code-assistant.useLanguageSpecificGuidance": {
+          "type": "boolean",
+          "default": true,
+          "description": "添加针对特定编程语言的提示指导"
+        },
+        "llm-code-assistant.maxPromptTokens": {
+          "type": "number",
+          "default": 4000,
+          "description": "提示词最大token数量，过大可能导致请求失败"
+        },
+        "llm-code-assistant.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "模型生成多样性，值越低结果越确定，值越高结果越随机"
         }
       }
     }
