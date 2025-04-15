@@ -30,9 +30,10 @@ ${completionMode === 'line' ? '请只生成一行代码，不要包含换行符�
 - 光标位置用"|光标位置|"标记，你应该从这个位置开始生成代码
 - 在单行模式下，只生成当前行缺失的部分，不要生成完整行
 - 在代码段模式下，只生成光标处开始的代码块，不要复制已有的后续代码
+- 我会提供光标所在函数或类的完整代码，请仔细分析整个函数或类的结构和逻辑
 
 我将提供以下上下文信息，请仔细利用这些信息生成最合适的代码补全：
-1. 代码上下文：当前文件的代码片段，请优先参考这部分内容
+1. 完整的函数/类代码上下文：当前光标所在函数或类的完整代码，包括前后文
 2. 当前作用域：了解当前代码所在的函数或类范围
 3. 语法上下文：了解光标是否在函数参数、条件语句等特定环境中
 4. 相关标识符：当前上下文中使用的变量、函数等，优先使用这些已有标识符
@@ -172,34 +173,33 @@ ${completionMode === 'line' ? '请只生成一行代码，不要包含换行符�
         // 对于单行模式，提供更精简的上下文
         if (completionMode === 'line') {
             // 提取当前行和周围几行代码
-            const lines = contextInfo.beforeCode.split('\n');
-            const beforeLines = lines.slice(Math.max(0, lines.length - 5));
+            const beforeLines = contextInfo.beforeCode.split('\n');
             const currentLine = contextInfo.beforeCursor + '|光标位置|' + contextInfo.afterCursor;
-            const afterLines = contextInfo.afterCode.split('\n').slice(0, 5);
+            const afterLines = contextInfo.afterCode.split('\n');
             
             return [
                 `文件: ${contextInfo.fileName}`,
                 `语言: ${contextInfo.languageId}`,
                 '代码上下文(请密切关注这部分，它是你理解和补全代码的核心信息):',
-                '--- 上文代码(直接在光标前) ---',
+                '--- 当前函数/类的前置代码 ---',
                 ...beforeLines,
                 '--- 当前行(| 表示光标位置) ---',
                 currentLine,
-                '--- 下文代码(直接在光标后，你不应该重复这部分代码) ---',
+                '--- 当前函数/类的后续代码(你不应该重复这部分代码) ---',
                 ...afterLines,
                 '注意: 请勿重复"光标位置"后面已存在的代码。你只需生成从光标位置开始的新代码。'
             ].join('\n');
         } else {
-            // 对于代码段模式，提供更丰富的上下文
+            // 对于代码段模式，提供函数/类的完整上下文
             return [
                 `文件: ${contextInfo.fileName}`,
                 `语言: ${contextInfo.languageId}`,
                 '代码上下文(请密切关注这部分，它是你理解和补全代码的核心信息):',
-                '--- 光标前代码 ---',
+                '--- 当前函数/类的前置代码 ---',
                 contextInfo.beforeCode,
                 '--- 当前行(| 表示光标位置) ---',
                 contextInfo.beforeCursor + '|光标位置|' + contextInfo.afterCursor,
-                '--- 光标后代码(这部分已存在，你不应该重复生成) ---',
+                '--- 当前函数/类的后续代码(这部分已存在，你不应该重复生成) ---',
                 contextInfo.afterCode,
                 '注意: 请勿重复"光标位置"后面已存在的代码。你只需生成从光标位置开始的新代码。'
             ].join('\n');
@@ -445,7 +445,7 @@ ${completionMode === 'line' ? '请只生成一行代码，不要包含换行符�
         finalPrompt = this.truncatePrompt(finalPrompt, maxPromptTokens);
         
         // 记录最终提示词长度
-        debug(`最终提示词长度: ${finalPrompt.length}个字符 prompt: ${finalPrompt}`);
+        console.log(`最终提示词长度: ${finalPrompt.length}个字符 prompt: ${finalPrompt}`);
         return finalPrompt;
     }
     
