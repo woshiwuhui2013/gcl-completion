@@ -490,7 +490,7 @@ ${completionMode === 'line' ? '请只生成一行代码，不要包含换行符�
         finalPrompt = this.truncatePrompt(finalPrompt, maxPromptTokens);
         
         // 记录最终提示词长度
-        log(`最终提示词长度: ${finalPrompt.length}个字符`);
+        console.log(`最终提示词长度: ${finalPrompt.length}个字符, 内容为： ${finalPrompt}`);
         return finalPrompt;
     }
     
